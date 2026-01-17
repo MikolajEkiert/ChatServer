@@ -9,10 +9,28 @@ function ChatPage({ roomCode, username, onLeave }) {
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const response = await fetch(`/api/rooms/${roomCode}/messages`);
+        if (response.ok) {
+          const history = await response.json();
+          setMessages(history);
+        }
+      } catch (error) {
+        console.error('Failed to load chat history:', error);
+      }
+    };
+    
+    fetchHistory();
+  }, [roomCode]);
+
+  useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname;
-    const port = window.location.port === '3000' ? '8080' : (window.location.port || '8080');
-    const wsUrl = `${protocol}//${host}:${port}/ws?room=${roomCode}&username=${encodeURIComponent(username)}`;
+    const host = window.location.port === '3000' 
+      ? `${window.location.hostname}:8080` 
+      : window.location.host;
+      
+    const wsUrl = `${protocol}//${host}/ws?room=${roomCode}&username=${encodeURIComponent(username)}`;
 
     const ws = new WebSocket(wsUrl);
 

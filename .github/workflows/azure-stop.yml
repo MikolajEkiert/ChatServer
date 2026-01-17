@@ -1,0 +1,34 @@
+name: Stop Azure App Service
+
+on:
+  schedule:
+    # Stop pon-pt o 18:00 UTC (19:00 CET, 20:00 CEST)
+    - cron: '0 18 * * 1-5'
+  
+  workflow_dispatch:
+
+jobs:
+  stop-app-service:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Stop App Service
+        run: |
+          echo "Stopping App Service: ${{ secrets.AZURE_WEBAPP_NAME }}"
+          az webapp stop \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --resource-group ${{ secrets.AZURE_RG }}
+          echo "App Service stopped successfully"
+      
+      - name: Check Status
+        run: |
+          STATUS=$(az webapp show \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --resource-group ${{ secrets.AZURE_RG }} \
+            --query state -o tsv)
+          echo "Current status: $STATUS"
+

@@ -25,6 +25,7 @@ builder.Services.AddSingleton(sp => new ChatRoomService(
     instanceId, 
     sp.GetRequiredService<IConnectionMultiplexer>()));
 builder.Services.AddSingleton<IRedisPublisher, RedisPublisher>();
+builder.Services.AddSingleton<ChatHistoryService>();
 builder.Services.AddHostedService<RedisSubscriber>();
 
 var app = builder.Build();
@@ -80,11 +81,12 @@ app.Use(async (context, next) =>
             }
             
             var clientId = Guid.NewGuid().ToString();
+            var historyService = context.RequestServices.GetRequiredService<ChatHistoryService>();
             chatRoomService.AddClient(roomCode, clientId, username, webSocket);
 
             try
             {
-                await HandleWebSocketAsync(webSocket, roomCode, clientId, username, chatRoomService, redisPublisher);
+                await HandleWebSocketAsync(webSocket, roomCode, clientId, username, chatRoomService, redisPublisher, historyService);
             }
             finally
             {
@@ -143,6 +145,14 @@ app.MapGet("/api/rooms/{roomCode}", (string roomCode, ChatRoomService chatRoomSe
     return Results.Ok(roomInfo);
 });
 
+app.MapGet("/api/rooms/{roomCode}/messages", async (string roomCode, ChatHistoryService historyService) =>
+{
+    var messages = await historyService.GetMessagesAsync(roomCode);
+    // Return raw JSON strings as a JSON array
+    var jsonArrayString = $"[{string.Join(",", messages)}]";
+    return Results.Content(jsonArrayString, "application/json");
+});
+
 app.MapGet("/api/rooms", (ChatRoomService chatRoomService) =>
 {
     var rooms = chatRoomService.GetRooms();
@@ -178,7 +188,8 @@ static async Task HandleWebSocketAsync(
     string clientId,
     string username,
     ChatRoomService chatRoomService,
-    IRedisPublisher redisPublisher)
+    IRedisPublisher redisPublisher,
+    ChatHistoryService historyService)
 {
     var buffer = new byte[1024 * 4];
     var jsonOptions = new JsonSerializerOptions
@@ -233,6 +244,9 @@ static async Task HandleWebSocketAsync(
 
                 var messageJson = JsonSerializer.Serialize(chatMessage, jsonOptions);
                 Console.WriteLine($"Received from {username} in room {roomCode}: {chatMessage.Message}");
+
+                // Save to Redis History
+                await historyService.AddMessageAsync(roomCode, messageJson);
 
                 // Publish to Redis only - all instances (including this one) will receive via RedisSubscriber
                 await redisPublisher.PublishMessageAsync(roomCode, messageJson);

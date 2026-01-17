@@ -1,0 +1,31 @@
+stages:
+  - build
+  - deploy
+
+build_job:
+  stage: build
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - apt-get update && apt-get install -y nodejs npm
+    - cd frontend
+    - npm install
+    - npm run build
+    - cd ..
+    - mkdir -p ChatServer/wwwroot
+    - cp -R frontend/build/* ChatServer/wwwroot/
+    - cd ChatServer
+    - dotnet publish -c Release -o publish
+    - cd publish
+    - apt-get install -y zip
+    - zip -r ../../app.zip .
+  artifacts:
+    paths:
+      - app.zip
+
+deploy_job:
+  stage: deploy
+  image: mcr.microsoft.com/azure-cli
+  script:
+    - az webapp deployment source config-zip --src app.zip --resource-group ChatFreePL --name WebChatServer --subscription "4de18ff5-0b72-46b1-a438-a27894ee51b2" --xml-publishing-profile $AZURE_PUBLISH_PROFILE
+  only:
+    - main

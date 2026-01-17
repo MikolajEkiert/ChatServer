@@ -112,3 +112,35 @@ public class RedisSubscriber : IHostedService
         }
     }
 }
+
+public class ChatHistoryService
+{
+    private readonly IConnectionMultiplexer _redis;
+    private const int MaxHistoryLength = 20;
+
+    public ChatHistoryService(IConnectionMultiplexer redis)
+    {
+        _redis = redis;
+    }
+
+    public async Task AddMessageAsync(string roomCode, string messageJson)
+    {
+        var db = _redis.GetDatabase();
+        var key = $"room:history:{roomCode}";
+        
+        // Transaction to add message and trim list atomically
+        var trans = db.CreateTransaction();
+        _ = trans.ListRightPushAsync(key, messageJson);
+        _ = trans.ListTrimAsync(key, -MaxHistoryLength, -1); // Keep only last N messages
+        _ = trans.KeyExpireAsync(key, TimeSpan.FromHours(24)); // Auto-cleanup room history after 24h
+        await trans.ExecuteAsync();
+    }
+
+    public async Task<IEnumerable<string>> GetMessagesAsync(string roomCode)
+    {
+        var db = _redis.GetDatabase();
+        var key = $"room:history:{roomCode}";
+        var messages = await db.ListRangeAsync(key);
+        return messages.Select(m => m.ToString());
+    }
+}
