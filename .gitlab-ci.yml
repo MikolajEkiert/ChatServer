@@ -4,7 +4,9 @@ stages:
 
 build_job:
   stage: build
-  image: mcr.microsoft.com/dotnet/sdk:8.0
+  image: mcr.microsoft.com/dotnet/sdk:8.0-jammy
+  tags:
+    - docker
   script:
     - apt-get update && apt-get install -y nodejs npm
     - cd frontend
