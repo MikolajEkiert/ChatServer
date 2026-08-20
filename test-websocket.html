@@ -18,13 +18,17 @@
             margin-bottom: 10px;
             background: #f9f9f9;
         }
+        .input-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
         input {
-            width: 70%;
             padding: 8px;
+            flex: 1;
         }
         button {
             padding: 8px 15px;
-            margin-left: 5px;
         }
         .status {
             padding: 10px;
@@ -44,13 +48,21 @@
 <body>
     <h1>WebSocket Chat Test</h1>
     <div id="status" class="status disconnected">Disconnected</div>
-    <div id="messages"></div>
-    <div>
-        <input type="text" id="messageInput" placeholder="Type a message..." disabled>
-        <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+
+    <div class="input-row">
+        <input type="text" id="roomInput" placeholder="Room code (e.g. TEST1)" value="TEST1">
+        <input type="text" id="userInput" placeholder="Username" value="Tester">
         <button id="connectBtn" onclick="connect()">Connect</button>
         <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
     </div>
+
+    <div id="messages"></div>
+
+    <div class="input-row">
+        <input type="text" id="messageInput" placeholder="Type a message..." disabled>
+        <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+    </div>
+
     <div style="margin-top: 20px;">
         <p><strong>Server 1:</strong> <button onclick="connectToServer(8080)">Connect to :8080</button></p>
         <p><strong>Server 2:</strong> <button onclick="connectToServer(8081)">Connect to :8081</button></p>
@@ -69,30 +81,47 @@
         }
 
         function connect() {
+            const room = document.getElementById('roomInput').value.trim();
+            const user = document.getElementById('userInput').value.trim();
+
+            if (!room || !user) {
+                alert('Room code and username are required');
+                return;
+            }
+
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//localhost:${currentPort}/ws`;
+            const wsUrl = `${protocol}//localhost:${currentPort}/ws?room=${encodeURIComponent(room)}&username=${encodeURIComponent(user)}`;
             
             socket = new WebSocket(wsUrl);
 
-            socket.onopen = function(event) {
+            socket.onopen = function() {
                 updateStatus('Connected', true);
                 document.getElementById('messageInput').disabled = false;
                 document.getElementById('sendBtn').disabled = false;
                 document.getElementById('connectBtn').disabled = true;
                 document.getElementById('disconnectBtn').disabled = false;
-                addMessage('System', 'Connected to server on port ' + currentPort);
+                document.getElementById('roomInput').disabled = true;
+                document.getElementById('userInput').disabled = true;
+                addMessage('System', 'Connected to server on port ' + currentPort + ' in room ' + room);
             };
 
             socket.onmessage = function(event) {
-                addMessage('Server', event.data);
+                try {
+                    const data = JSON.parse(event.data);
+                    addMessage(data.username || 'Server', data.message || event.data);
+                } catch {
+                    addMessage('Server', event.data);
+                }
             };
 
-            socket.onclose = function(event) {
+            socket.onclose = function() {
                 updateStatus('Disconnected', false);
                 document.getElementById('messageInput').disabled = true;
                 document.getElementById('sendBtn').disabled = true;
                 document.getElementById('connectBtn').disabled = false;
                 document.getElementById('disconnectBtn').disabled = true;
+                document.getElementById('roomInput').disabled = false;
+                document.getElementById('userInput').disabled = false;
                 addMessage('System', 'Disconnected from server');
             };
 
@@ -111,9 +140,17 @@
         function sendMessage() {
             const input = document.getElementById('messageInput');
             const message = input.value.trim();
+            const user = document.getElementById('userInput').value.trim();
+            const room = document.getElementById('roomInput').value.trim();
+
             if (message && socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(message);
-                addMessage('You', message);
+                const payload = {
+                    username: user,
+                    roomCode: room,
+                    message: message,
+                    timestamp: new Date().toISOString()
+                };
+                socket.send(JSON.stringify(payload));
                 input.value = '';
             }
         }
@@ -121,7 +158,15 @@
         function addMessage(sender, message) {
             const messagesDiv = document.getElementById('messages');
             const messageDiv = document.createElement('div');
-            messageDiv.innerHTML = `<strong>${sender}:</strong> ${message}`;
+            
+            const senderSpan = document.createElement('strong');
+            senderSpan.textContent = `${sender}: `;
+            
+            const messageSpan = document.createElement('span');
+            messageSpan.textContent = message;
+            
+            messageDiv.appendChild(senderSpan);
+            messageDiv.appendChild(messageSpan);
             messagesDiv.appendChild(messageDiv);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
@@ -132,8 +177,7 @@
             statusDiv.className = 'status ' + (connected ? 'connected' : 'disconnected');
         }
 
-        // Allow Enter key to send message
-        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+        document.getElementById('messageInput').addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
                 sendMessage();
             }
@@ -141,4 +185,3 @@
     </script>
 </body>
 </html>
-
