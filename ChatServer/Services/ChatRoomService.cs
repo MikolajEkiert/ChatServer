@@ -1,18 +1,18 @@
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
-using System.Text.Json;
 using StackExchange.Redis;
 
 namespace ChatServer.Services;
 
 public class ChatRoomService
 {
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, WebSocket>> _rooms = new();
-    private readonly ConcurrentDictionary<string, string> _clientToRoom = new(); // clientId -> roomCode
-    private readonly ConcurrentDictionary<string, string> _clientToUsername = new(); // clientId -> username
+    private sealed record ConnectedClient(WebSocket Socket, SemaphoreSlim SendLock);
+
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, ConnectedClient>> _rooms = new();
+    private readonly ConcurrentDictionary<string, string> _clientToRoom = new();
+    private readonly ConcurrentDictionary<string, string> _clientToUsername = new();
     private readonly ILogger<ChatRoomService> _logger;
-    private readonly Random _random = new();
     private readonly string _instanceId;
     private readonly IConnectionMultiplexer _redis;
     private readonly IDatabase _redisDb;
@@ -33,9 +33,9 @@ public class ChatRoomService
         
         do
         {
-            int length = _random.Next(4, 7);
+            int length = Random.Shared.Next(4, 7);
             code = new string(Enumerable.Repeat(chars, length)
-                .Select(s => s[_random.Next(s.Length)]).ToArray());
+                .Select(s => s[Random.Shared.Next(s.Length)]).ToArray());
             attempts++;
         } while (_redisDb.KeyExists($"room:{code}") && attempts < 100);
 
@@ -50,7 +50,7 @@ public class ChatRoomService
     public string CreateRoom()
     {
         var roomCode = GenerateRoomCode();
-        var room = new ConcurrentDictionary<string, WebSocket>();
+        var room = new ConcurrentDictionary<string, ConnectedClient>();
         _rooms.TryAdd(roomCode, room);
         _redisDb.StringSet($"room:{roomCode}", "created", TimeSpan.FromHours(24));
         _logger.LogInformation("Created room with code: {RoomCode}", roomCode);
@@ -78,8 +78,9 @@ public class ChatRoomService
 
     public void AddClient(string roomCode, string clientId, string username, WebSocket webSocket)
     {
-        var room = _rooms.GetOrAdd(roomCode, _ => new ConcurrentDictionary<string, WebSocket>());
-        room.TryAdd(clientId, webSocket);
+        var room = _rooms.GetOrAdd(roomCode, _ => new ConcurrentDictionary<string, ConnectedClient>());
+        var client = new ConnectedClient(webSocket, new SemaphoreSlim(1, 1));
+        room.TryAdd(clientId, client);
         _clientToRoom.TryAdd(clientId, roomCode);
         _clientToUsername.TryAdd(clientId, username);
         
@@ -97,8 +98,9 @@ public class ChatRoomService
             
             if (_rooms.TryGetValue(roomCode, out var room))
             {
-                if (room.TryRemove(clientId, out _))
+                if (room.TryRemove(clientId, out var client))
                 {
+                    client.SendLock.Dispose();
                     _logger.LogInformation("Client {ClientId} left room {RoomCode}. Total clients in room: {Count}", 
                         clientId, roomCode, room.Count);
                     
@@ -119,38 +121,46 @@ public class ChatRoomService
 
         var tasks = new List<Task>();
 
-        foreach (var client in room)
+        foreach (var (clientId, client) in room)
         {
-            if (client.Key == excludeClientId)
+            if (clientId == excludeClientId)
                 continue;
 
-            if (client.Value.State == WebSocketState.Open)
+            if (client.Socket.State == WebSocketState.Open)
             {
                 var buffer = Encoding.UTF8.GetBytes(messageJson);
-                tasks.Add(SendMessageAsync(client.Value, buffer));
+                tasks.Add(SendMessageAsync(client, buffer));
             }
             else
             {
-                RemoveClient(client.Key);
+                RemoveClient(clientId);
             }
         }
 
         await Task.WhenAll(tasks);
     }
 
-    private async Task SendMessageAsync(WebSocket webSocket, byte[] message)
+    private async Task SendMessageAsync(ConnectedClient client, byte[] message)
     {
+        await client.SendLock.WaitAsync();
         try
         {
-            await webSocket.SendAsync(
-                new ArraySegment<byte>(message),
-                WebSocketMessageType.Text,
-                true,
-                CancellationToken.None);
+            if (client.Socket.State == WebSocketState.Open)
+            {
+                await client.Socket.SendAsync(
+                    new ArraySegment<byte>(message),
+                    WebSocketMessageType.Text,
+                    true,
+                    CancellationToken.None);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending message to client");
+        }
+        finally
+        {
+            client.SendLock.Release();
         }
     }
 

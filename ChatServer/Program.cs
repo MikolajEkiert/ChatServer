@@ -14,12 +14,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var redisConnectionString = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
-builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
-{
-    return ConnectionMultiplexer.Connect(redisConnectionString);
-});
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp => ConnectionMultiplexer.Connect(redisConnectionString));
 
-// register chat services
 builder.Services.AddSingleton(sp => new ChatRoomService(
     sp.GetRequiredService<ILogger<ChatRoomService>>(), 
     instanceId, 
@@ -30,19 +26,12 @@ builder.Services.AddHostedService<RedisSubscriber>();
 
 var app = builder.Build();
 
-// DO NOT REMOVE (disable HTTPS redirection)
-app.Use(async (context, next) =>
-{
-    await next();
-});
-
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-//static files for React frontend
 app.UseStaticFiles();
 app.UseDefaultFiles();
 
@@ -91,6 +80,7 @@ app.Use(async (context, next) =>
             finally
             {
                 chatRoomService.RemoveClient(clientId);
+                webSocket.Dispose();
             }
         }
         else
@@ -148,7 +138,6 @@ app.MapGet("/api/rooms/{roomCode}", (string roomCode, ChatRoomService chatRoomSe
 app.MapGet("/api/rooms/{roomCode}/messages", async (string roomCode, ChatHistoryService historyService) =>
 {
     var messages = await historyService.GetMessagesAsync(roomCode);
-    // Return raw JSON strings as a JSON array
     var jsonArrayString = $"[{string.Join(",", messages)}]";
     return Results.Content(jsonArrayString, "application/json");
 });
@@ -201,8 +190,16 @@ static async Task HandleWebSocketAsync(
     {
         try
         {
-            var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-            
+            using var ms = new MemoryStream();
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                if (result.MessageType == WebSocketMessageType.Close)
+                    break;
+                ms.Write(buffer, 0, result.Count);
+            } while (!result.EndOfMessage);
+
             if (result.MessageType == WebSocketMessageType.Close)
             {
                 await webSocket.CloseAsync(
@@ -214,41 +211,34 @@ static async Task HandleWebSocketAsync(
 
             if (result.MessageType == WebSocketMessageType.Text)
             {
-                var messageText = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                
+                var messageText = Encoding.UTF8.GetString(ms.ToArray());
                 ChatMessage chatMessage;
                 try
                 {
                     chatMessage = JsonSerializer.Deserialize<ChatMessage>(messageText, jsonOptions) 
                         ?? new ChatMessage();
                     
-                    if (string.IsNullOrEmpty(chatMessage.Username))
-                        chatMessage.Username = username;
-                    if (string.IsNullOrEmpty(chatMessage.RoomCode))
-                        chatMessage.RoomCode = roomCode;
-                    if (chatMessage.Timestamp == default)
-                        chatMessage.Timestamp = DateTime.UtcNow;
-                    chatMessage.InstanceId = chatRoomService.GetInstanceId();
+                    if (string.IsNullOrEmpty(chatMessage.Message))
+                        chatMessage.Message = messageText;
                 }
                 catch
                 {
                     chatMessage = new ChatMessage
                     {
-                        Username = username,
-                        Message = messageText,
-                        Timestamp = DateTime.UtcNow,
-                        RoomCode = roomCode,
-                        InstanceId = chatRoomService.GetInstanceId()
+                        Message = messageText
                     };
                 }
+
+                chatMessage.Username = username;
+                chatMessage.RoomCode = roomCode;
+                chatMessage.InstanceId = chatRoomService.GetInstanceId();
+                if (chatMessage.Timestamp == default)
+                    chatMessage.Timestamp = DateTime.UtcNow;
 
                 var messageJson = JsonSerializer.Serialize(chatMessage, jsonOptions);
                 Console.WriteLine($"Received from {username} in room {roomCode}: {chatMessage.Message}");
 
-                // Save to Redis History
                 await historyService.AddMessageAsync(roomCode, messageJson);
-
-                // Publish to Redis only - all instances (including this one) will receive via RedisSubscriber
                 await redisPublisher.PublishMessageAsync(roomCode, messageJson);
             }
         }
