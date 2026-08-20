@@ -43,7 +43,7 @@ function ChatPage({ roomCode, username, onLeave }) {
       try {
         const message = JSON.parse(event.data);
         setMessages((prev) => {
-          if (!prev.some((msg) => msg.timestamp === message.timestamp && msg.username === message.username)) {
+          if (!prev.some((msg) => msg.timestamp === message.timestamp && msg.username === message.username && msg.message === message.message)) {
             return [...prev, message];
           }
           return prev;
@@ -69,7 +69,7 @@ function ChatPage({ roomCode, username, onLeave }) {
     };
 
     return () => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }
     };
@@ -95,7 +95,7 @@ function ChatPage({ roomCode, username, onLeave }) {
     setMessageInput('');
   };
 
-  const handleKeyPress = (e) => {
+  const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -168,7 +168,7 @@ function ChatPage({ roomCode, username, onLeave }) {
             placeholder={isConnected ? "Type a message..." : "Connecting..."}
             value={messageInput}
             onChange={(e) => setMessageInput(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyDown}
             disabled={!isConnected}
             className="message-input"
           />
@@ -186,4 +186,3 @@ function ChatPage({ roomCode, username, onLeave }) {
 }
 
 export default ChatPage;
-

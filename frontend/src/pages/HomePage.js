@@ -62,7 +62,7 @@ function HomePage({ onJoinRoom, onCreateRoom }) {
     }
   };
 
-  const handleKeyPress = (e, action) => {
+  const handleKeyDown = (e, action) => {
     if (e.key === 'Enter') {
       action();
     }
@@ -84,7 +84,7 @@ function HomePage({ onJoinRoom, onCreateRoom }) {
               placeholder="Enter your username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              onKeyPress={(e) => handleKeyPress(e, handleCreateRoom)}
+              onKeyDown={(e) => handleKeyDown(e, handleCreateRoom)}
               maxLength={20}
             />
             <button 
@@ -109,7 +109,7 @@ function HomePage({ onJoinRoom, onCreateRoom }) {
               placeholder="Room code (e.g., ABC123)"
               value={roomCode}
               onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-              onKeyPress={(e) => handleKeyPress(e, handleJoinRoom)}
+              onKeyDown={(e) => handleKeyDown(e, handleJoinRoom)}
               maxLength={6}
               style={{ textTransform: 'uppercase' }}
             />
@@ -118,7 +118,7 @@ function HomePage({ onJoinRoom, onCreateRoom }) {
               placeholder="Your username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              onKeyPress={(e) => handleKeyPress(e, handleJoinRoom)}
+              onKeyDown={(e) => handleKeyDown(e, handleJoinRoom)}
               maxLength={20}
             />
             <button onClick={handleJoinRoom} className="join-btn">
@@ -132,4 +132,3 @@ function HomePage({ onJoinRoom, onCreateRoom }) {
 }
 
 export default HomePage;
-
