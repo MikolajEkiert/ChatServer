@@ -19,15 +19,4 @@
       </Content>
     </ItemGroup>
 
-    <Target Name="BuildReact" BeforeTargets="Build" Condition="Exists('$(SolutionDir)frontend/package.json')">
-        <Exec Command="npm run build" WorkingDirectory="$(SolutionDir)frontend" 
-              ContinueOnError="false" />
-        <ItemGroup>
-            <ReactBuildFiles Include="$(SolutionDir)frontend/build/**/*" />
-        </ItemGroup>
-        <Copy SourceFiles="@(ReactBuildFiles)" 
-              DestinationFolder="$(ProjectDir)wwwroot/%(RecursiveDir)" 
-              SkipUnchangedFiles="true" />
-    </Target>
-
 </Project>
