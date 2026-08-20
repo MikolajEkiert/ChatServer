@@ -1,5 +1,13 @@
 bin/
 obj/
+publish/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/
+.DS_Store
+.idea/
+*.zip
+ChatServer/wwwroot/
+!ChatServer/wwwroot/.gitkeep
+frontend/node_modules/
+frontend/build/
